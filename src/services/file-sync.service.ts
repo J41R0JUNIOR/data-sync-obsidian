@@ -10,7 +10,7 @@ export class FileSyncService {
 			vault.getFiles().map((file) => file.path.toLowerCase()),
 		);
 
-		const remoteFiles = await this.fileProvider.listFiles(vaultBasePath);
+		const remoteFiles = await (this.fileProvider.pullFiles?.(vaultBasePath) ?? this.fileProvider.listFiles(vaultBasePath));
 		const imported: string[] = [];
 		const skipped: string[] = [];
 

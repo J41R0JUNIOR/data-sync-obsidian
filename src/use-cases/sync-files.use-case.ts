@@ -5,6 +5,8 @@ export class SyncFilesUseCase {
 	constructor(private readonly fileProvider: FileProvider) {}
 
 	async execute(vaultBasePath: string): Promise<RemoteFile[]> {
-		return this.fileProvider.listFiles(vaultBasePath);
+		return this.fileProvider.pullFiles
+			? this.fileProvider.pullFiles(vaultBasePath)
+			: this.fileProvider.listFiles(vaultBasePath);
 	}
 }

@@ -1,7 +1,7 @@
 import { Plugin } from 'obsidian';
 import { registerPluginCommands } from './application/register-commands.js';
 import { GoogleAuthProvider } from './providers/google-auth.provider.js';
-import { GoogleDriveProvider } from './providers/google-drive.provider.js';
+import { GoogleDriveFileProvider } from './providers/google-drive.provider.js';
 import { DEFAULT_SETTINGS, DataSyncPluginSettings } from './settings.js';
 import { FileSyncService } from './services/file-sync.service.js';
 import { SyncSettingsTab } from './ui/sync-settings-tab.js';
@@ -15,10 +15,11 @@ export default class DataSyncPlugin extends Plugin {
 		const statusBarItemEl = this.addStatusBarItem();
 		statusBarItemEl.setText('Cloud sync ready');
 
+		const authProvider = new GoogleAuthProvider();
 		const fileSyncService = new FileSyncService(
-			new GoogleDriveProvider(new GoogleAuthProvider()),
+			new GoogleDriveFileProvider(authProvider),
 		);
-		registerPluginCommands(this, fileSyncService);
+		registerPluginCommands(this, fileSyncService, authProvider);
 		this.addSettingTab(new SyncSettingsTab(this.app, this));
 	}
 

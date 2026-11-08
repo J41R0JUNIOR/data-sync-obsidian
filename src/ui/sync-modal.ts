@@ -1,4 +1,5 @@
 import { App, ButtonComponent, Modal, Notice, Setting } from 'obsidian';
+import type { GoogleAuthProvider } from '../providers/google-auth.provider.js';
 import type DataSyncPlugin from '../main.js';
 import type { FileSyncService } from '../services/file-sync.service.js';
 
@@ -7,6 +8,7 @@ export class SyncModal extends Modal {
 		app: App,
 		private readonly plugin: DataSyncPlugin,
 		private readonly fileSyncService: FileSyncService,
+		private readonly authProvider: GoogleAuthProvider,
 	) {
 		super(app);
 	}
@@ -43,6 +45,11 @@ export class SyncModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton((button: ButtonComponent) => {
+				button.setButtonText('Authorize with Google').onClick(async () => {
+					await this.authorizeGoogle();
+				});
+			})
+			.addButton((button: ButtonComponent) => {
 				button.setButtonText('Sync now').onClick(async () => {
 					await this.syncNow();
 				});
@@ -50,6 +57,27 @@ export class SyncModal extends Modal {
 			.addButton((button: ButtonComponent) => {
 				button.setButtonText('Close').onClick(() => this.close());
 			});
+	}
+
+	async authorizeGoogle() {
+		const vaultBasePath = (this.app.vault.adapter as any).getBasePath?.();
+		if (!vaultBasePath) {
+			new Notice('Vault path not available.');
+			return;
+		}
+
+		try {
+			const client = await this.authProvider.authorize?.(vaultBasePath);
+			if (!client) {
+				throw new Error('Google auth provider does not support authorization.');
+			}
+			this.plugin.settings.oauthToken = client.credentials as Record<string, unknown>;
+			await this.plugin.saveSettings();
+			new Notice('Google Drive authorization completed.');
+		} catch (error) {
+			console.error('Google authorization failed', error);
+			new Notice('Google authorization failed.');
+		}
 	}
 
 	async syncNow() {

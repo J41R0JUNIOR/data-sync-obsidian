@@ -4,7 +4,7 @@ import type { AuthProvider } from './auth-provider.js';
 import type { FileProvider } from './file-provider.js';
 import { GoogleAuthProvider } from './google-auth.provider.js';
 
-export class GoogleDriveProvider implements FileProvider {
+export class GoogleDriveFileProvider implements FileProvider {
 	constructor(private readonly authProvider: AuthProvider = new GoogleAuthProvider()) {}
 
 	async listFiles(vaultBasePath: string): Promise<RemoteFile[]> {
@@ -19,5 +19,9 @@ export class GoogleDriveProvider implements FileProvider {
 		return files
 			.filter((file): file is RemoteFile => Boolean(file.id && file.name))
 			.map((file) => ({ id: file.id, name: file.name }));
+	}
+
+	async pullFiles(vaultBasePath: string): Promise<RemoteFile[]> {
+		return this.listFiles(vaultBasePath);
 	}
 }

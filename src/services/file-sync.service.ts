@@ -3,6 +3,9 @@ import type { RemoteFolder } from '../domain/remote-folder.js';
 import type { SyncSummary } from '../domain/sync-summary.js';
 import type { FileProvider } from '../providers/file-provider.js';
 
+const IMPORT_BATCH_SIZE = 10;
+const MAX_PENDING_IMPORT_BATCHES = 2;
+
 export class FileSyncService {
 	constructor(private readonly fileProvider: FileProvider) {}
 
@@ -15,80 +18,132 @@ export class FileSyncService {
 			vault.getFiles().map((file) => file.path.toLowerCase()),
 		);
 
-		const remoteFiles = await this.fileProvider.pullFiles(vaultBasePath, remoteFolderId);
 		const imported: string[] = [];
 		const skipped: string[] = [];
+		const failed: string[] = [];
+		const pendingBatches: Promise<void>[] = [];
+		let totalRemoteFiles = 0;
+		let filesToImport: Array<{ path: string; content: ArrayBuffer }> = [];
 
-		for (const remoteFile of remoteFiles) {
-			const safePath = this.toSafeVaultPath(remoteFile.path);
-			const normalizedPath = safePath.toLowerCase();
-
-			if (localFiles.has(normalizedPath)) {
-				skipped.push(safePath);
-				continue;
+		const scheduleImportBatch = () => {
+			if (filesToImport.length === 0) {
+				return;
 			}
+			const batch = filesToImport;
+			filesToImport = [];
+			pendingBatches.push(this.importBatch(vault, batch, imported, skipped, failed));
+		};
 
-			const pathSegments = safePath.split('/');
-			const fileName = pathSegments.pop();
-			if (!fileName) {
-				throw new Error(`Remote file has an invalid path: ${remoteFile.path}`);
-			}
-
-			let parentPath = '';
-			let pathConflict = false;
-			for (const segment of pathSegments) {
-				parentPath = parentPath ? `${parentPath}/${segment}` : segment;
-				const existingFolder = await vault.adapter.stat(parentPath);
-				if (existingFolder?.type === 'folder') {
-					continue;
-				}
-				if (existingFolder?.type === 'file') {
-					pathConflict = true;
-					break;
-				}
-
+		try {
+			for await (const remoteFile of this.fileProvider.pullFiles(vaultBasePath, remoteFolderId)) {
+				totalRemoteFiles++;
 				try {
-					await vault.adapter.mkdir(parentPath);
-				} catch (error) {
-					const folderAfterCreate = await vault.adapter.stat(parentPath);
-					if (folderAfterCreate?.type === 'folder') {
+					const safePath = this.toSafeVaultPath(remoteFile.path);
+					const normalizedPath = safePath.toLowerCase();
+					if (localFiles.has(normalizedPath) || await vault.adapter.stat(safePath)) {
+						skipped.push(safePath);
+						localFiles.add(normalizedPath);
 						continue;
 					}
-					if (folderAfterCreate?.type === 'file') {
-						pathConflict = true;
-						break;
+
+					if (!await this.ensureParentFolders(vault, safePath)) {
+						skipped.push(safePath);
+						localFiles.add(normalizedPath);
+						continue;
 					}
-					throw error;
-				}
-			}
 
-			if (pathConflict || await vault.adapter.stat(safePath)) {
-				skipped.push(safePath);
-				localFiles.add(normalizedPath);
-				continue;
-			}
-
-			try {
-				await vault.createBinary(safePath, remoteFile.content);
-			} catch (error) {
-				if (await vault.adapter.stat(safePath)) {
-					skipped.push(safePath);
+					filesToImport.push({ path: safePath, content: remoteFile.content });
 					localFiles.add(normalizedPath);
-					continue;
+					if (filesToImport.length >= IMPORT_BATCH_SIZE) {
+						scheduleImportBatch();
+						if (pendingBatches.length >= MAX_PENDING_IMPORT_BATCHES) {
+							await pendingBatches.shift();
+						}
+					}
+				} catch (error) {
+					console.error(`Preparing remote file "${remoteFile.path}" failed`, error);
+					failed.push(remoteFile.path);
 				}
-				throw error;
 			}
-
-			imported.push(safePath);
-			localFiles.add(normalizedPath);
+		} catch (error) {
+			await Promise.all(pendingBatches);
+			throw error;
 		}
 
+		scheduleImportBatch();
+		await Promise.all(pendingBatches);
+
 		return {
-			totalRemoteFiles: remoteFiles.length,
+			totalRemoteFiles,
 			totalSynced: imported.length,
 			imported,
 			skipped,
+			failed,
 		};
+	}
+
+	private async importBatch(
+		vault: Vault,
+		batch: Array<{ path: string; content: ArrayBuffer }>,
+		imported: string[],
+		skipped: string[],
+		failed: string[],
+	): Promise<void> {
+		const results = await Promise.allSettled(
+			batch.map((file) => vault.createBinary(file.path, file.content)),
+		);
+
+		for (const [batchIndex, result] of results.entries()) {
+			const file = batch[batchIndex];
+			if (!file) {
+				continue;
+			}
+
+			if (result.status === 'fulfilled') {
+				imported.push(file.path);
+				continue;
+			}
+
+			if (await vault.adapter.stat(file.path)) {
+				skipped.push(file.path);
+				continue;
+			}
+
+			console.error(`Importing remote file "${file.path}" failed`, result.reason);
+			failed.push(file.path);
+		}
+	}
+
+	private async ensureParentFolders(vault: Vault, filePath: string): Promise<boolean> {
+		const pathSegments = filePath.split('/');
+		pathSegments.pop();
+		let parentPath = '';
+
+		for (const segment of pathSegments) {
+			parentPath = parentPath ? `${parentPath}/${segment}` : segment;
+			const existingFolder = await vault.adapter.stat(parentPath);
+			if (existingFolder?.type === 'folder') {
+				continue;
+			}
+			if (existingFolder?.type === 'file') {
+				return false;
+			}
+
+			try {
+				await vault.adapter.mkdir(parentPath);
+			} catch (error) {
+				const folderAfterCreate = await vault.adapter.stat(parentPath);
+				if (folderAfterCreate?.type === 'folder') {
+					continue;
+				}
+				if (folderAfterCreate?.type === 'file') {
+					return false;
+				}
+				throw error;
+			}
+		}
+
+		return true;
 	}
 
 	private toSafeVaultPath(remotePath: string): string {

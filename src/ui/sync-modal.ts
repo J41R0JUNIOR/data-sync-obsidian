@@ -109,12 +109,15 @@ export class SyncModal extends Modal {
 
 		try {
 			const result = await this.fileSyncService.syncVault(this.app.vault, vaultBasePath, remoteFolderId);
-			if (result.imported.length === 0) {
-				new Notice(`No new remote files to import. ${result.skipped.length} already present.`);
-				return;
+			const summary = [
+				`Imported ${result.imported.length}`,
+				`skipped ${result.skipped.length}`,
+				`failed ${result.failed.length}`,
+			].join(', ');
+			new Notice(`Sync complete: ${summary}.`);
+			if (result.failed.length > 0) {
+				console.error('Some remote files could not be imported', result.failed);
 			}
-
-			new Notice(`Imported ${result.imported.length} file(s): ${result.imported.join(', ')}`);
 		} catch (error) {
 			console.error('Remote sync failed', error);
 			const reason = error instanceof Error ? error.message : String(error);

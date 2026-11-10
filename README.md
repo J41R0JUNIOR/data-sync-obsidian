@@ -12,7 +12,7 @@ Sync remote files into your Obsidian vault.
 ## Current status
 
 - Google Drive support is implemented.
-- Files are downloaded into the vault with their folder structure when they do not already exist.
+- Files are downloaded and imported in an overlapping, bounded pipeline, preserving folder structure and skipping files that already exist.
 - The project is designed to support OneDrive, Dropbox, and other providers later.
 
 ## Setup

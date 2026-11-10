@@ -7,6 +7,8 @@ import type { FileProvider } from './file-provider.js';
 import { GoogleAuthProvider } from './google-auth.provider.js';
 
 export class GoogleDriveFileProvider implements FileProvider {
+	private static readonly DOWNLOAD_CONCURRENCY = 5;
+
 	constructor(private readonly authProvider: AuthProvider = new GoogleAuthProvider()) {}
 
 	async listFiles(vaultBasePath: string, remoteFolderId: string): Promise<RemoteFile[]> {
@@ -43,17 +45,18 @@ export class GoogleDriveFileProvider implements FileProvider {
 		return folders;
 	}
 
-	async pullFiles(vaultBasePath: string, remoteFolderId: string): Promise<RemoteFileContent[]> {
+	async *pullFiles(vaultBasePath: string, remoteFolderId: string): AsyncGenerator<RemoteFileContent> {
 		const auth = await this.authProvider.getAuth(vaultBasePath);
 		const drive = google.drive({ version: 'v3', auth });
 		const remoteFiles = await this.listFilesInDrive(drive, remoteFolderId);
-		const downloadedFiles: RemoteFileContent[] = [];
 
-		for (const file of remoteFiles) {
-			downloadedFiles.push(await this.downloadFile(drive, file));
+		for (let index = 0; index < remoteFiles.length; index += GoogleDriveFileProvider.DOWNLOAD_CONCURRENCY) {
+			const batch = remoteFiles.slice(index, index + GoogleDriveFileProvider.DOWNLOAD_CONCURRENCY);
+			const downloadedFiles = await Promise.all(batch.map((file) => this.downloadFile(drive, file)));
+			for (const file of downloadedFiles) {
+				yield file;
+			}
 		}
-
-		return downloadedFiles;
 	}
 
 	private async listFilesInDrive(drive: drive_v3.Drive, rootFolderId: string): Promise<RemoteFile[]> {

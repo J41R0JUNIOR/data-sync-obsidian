@@ -3,4 +3,5 @@ export interface SyncSummary {
 	totalSynced: number;
 	imported: string[];
 	skipped: string[];
+	failed: string[];
 }

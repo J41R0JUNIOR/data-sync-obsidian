@@ -4,7 +4,7 @@ import * as path from 'path';
 import { OAuth2Client } from 'google-auth-library';
 import type { AuthProvider } from './auth-provider.js';
 
-const SCOPES = ['https://www.googleapis.com/auth/drive.metadata.readonly'];
+const SCOPES = ['https://www.googleapis.com/auth/drive.readonly'];
 const CREDENTIALS_PATH = '.obsidian/plugins/data-sync-obsidian/credentials.json';
 const DATA_PATH = '.obsidian/plugins/data-sync-obsidian/data.json';
 

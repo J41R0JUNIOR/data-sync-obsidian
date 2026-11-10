@@ -1,11 +1,11 @@
 export interface DataSyncPluginSettings {
 	providerName: string;
-	autoSync: boolean;
 	oauthToken?: Record<string, unknown>;
+	remoteFolderId?: string;
+	remoteFolderName?: string;
 }
 
 export const DEFAULT_SETTINGS: DataSyncPluginSettings = {
 	providerName: 'Google Drive',
-	autoSync: true,
 	oauthToken: undefined,
 };

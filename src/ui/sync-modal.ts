@@ -2,6 +2,7 @@ import { App, ButtonComponent, Modal, Notice, Setting } from 'obsidian';
 import type { GoogleAuthProvider } from '../providers/google-auth.provider.js';
 import type DataSyncPlugin from '../main.js';
 import type { FileSyncService } from '../services/file-sync.service.js';
+import { RemoteFolderPickerModal } from './remote-folder-picker-modal.js';
 
 export class SyncModal extends Modal {
 	constructor(
@@ -32,16 +33,30 @@ export class SyncModal extends Modal {
 			);
 
 		new Setting(contentEl)
-			.setName('Automatic sync')
-			.setDesc('Keep automatic synchronization enabled.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.autoSync)
-					.onChange(async (value) => {
-						this.plugin.settings.autoSync = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+			.setName('Vault folder on Google Drive')
+			.setDesc(this.plugin.settings.remoteFolderName ?? 'No folder selected.')
+			.addButton((button) => {
+				button.setButtonText('Choose folder').onClick(() => {
+					const vaultBasePath = this.getVaultBasePath();
+					if (!vaultBasePath) {
+						new Notice('Vault path not available.');
+						return;
+					}
+
+					new RemoteFolderPickerModal(
+						this.app,
+						this.fileSyncService,
+						vaultBasePath,
+						async (folder) => {
+							this.plugin.settings.remoteFolderId = folder.id;
+							this.plugin.settings.remoteFolderName = folder.name;
+							await this.plugin.saveSettings();
+							new Notice(`Google Drive folder selected: ${folder.name}`);
+							this.onOpen();
+						},
+					).open();
+				});
+			});
 
 		new Setting(contentEl)
 			.addButton((button: ButtonComponent) => {
@@ -50,17 +65,16 @@ export class SyncModal extends Modal {
 				});
 			})
 			.addButton((button: ButtonComponent) => {
-				button.setButtonText('Sync now').onClick(async () => {
-					await this.syncNow();
-				});
+				button
+					.setButtonText('Sync now')
+					.onClick(async () => {
+						await this.syncNow();
+					});
 			})
-			.addButton((button: ButtonComponent) => {
-				button.setButtonText('Close').onClick(() => this.close());
-			});
 	}
 
 	async authorizeGoogle() {
-		const vaultBasePath = (this.app.vault.adapter as any).getBasePath?.();
+		const vaultBasePath = this.getVaultBasePath();
 		if (!vaultBasePath) {
 			new Notice('Vault path not available.');
 			return;
@@ -81,14 +95,20 @@ export class SyncModal extends Modal {
 	}
 
 	async syncNow() {
-		const vaultBasePath = (this.app.vault.adapter as any).getBasePath?.();
+		const vaultBasePath = this.getVaultBasePath();
 		if (!vaultBasePath) {
 			new Notice('Vault path not available.');
 			return;
 		}
 
+		const remoteFolderId = this.plugin.settings.remoteFolderId;
+		if (!remoteFolderId) {
+			new Notice('Choose your Google Drive vault folder before syncing.');
+			return;
+		}
+
 		try {
-			const result = await this.fileSyncService.syncVault(this.app.vault, vaultBasePath);
+			const result = await this.fileSyncService.syncVault(this.app.vault, vaultBasePath, remoteFolderId);
 			if (result.imported.length === 0) {
 				new Notice(`No new remote files to import. ${result.skipped.length} already present.`);
 				return;
@@ -97,8 +117,19 @@ export class SyncModal extends Modal {
 			new Notice(`Imported ${result.imported.length} file(s): ${result.imported.join(', ')}`);
 		} catch (error) {
 			console.error('Remote sync failed', error);
-			new Notice('Failed to sync remote files.');
+			const reason = error instanceof Error ? error.message : String(error);
+			new Notice(`Failed to sync remote files: ${reason}`);
 		}
+	}
+
+	private getVaultBasePath(): string | undefined {
+		const adapter = this.app.vault.adapter;
+		if (!('getBasePath' in adapter) || typeof adapter.getBasePath !== 'function') {
+			return undefined;
+		}
+
+		const basePath = (adapter.getBasePath as () => unknown).call(adapter);
+		return typeof basePath === 'string' && basePath.length > 0 ? basePath : undefined;
 	}
 
 	onClose() {

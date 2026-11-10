@@ -25,17 +25,5 @@ export class SyncSettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}),
 			);
-
-		new Setting(containerEl)
-			.setName('Automatic sync')
-			.setDesc('Allow automatic sync of remote files into the vault.')
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.plugin.settings.autoSync)
-					.onChange(async (value) => {
-						this.plugin.settings.autoSync = value;
-						await this.plugin.saveSettings();
-					}),
-			);
 	}
 }

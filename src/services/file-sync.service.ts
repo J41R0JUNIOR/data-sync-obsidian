@@ -1,4 +1,4 @@
-import { TFolder, Vault } from 'obsidian';
+import { Vault } from 'obsidian';
 import type { RemoteFolder } from '../domain/remote-folder.js';
 import type { SyncSummary } from '../domain/sync-summary.js';
 import type { FileProvider } from '../providers/file-provider.js';
@@ -35,17 +35,50 @@ export class FileSyncService {
 			}
 
 			let parentPath = '';
+			let pathConflict = false;
 			for (const segment of pathSegments) {
 				parentPath = parentPath ? `${parentPath}/${segment}` : segment;
-				const existingFolder = vault.getAbstractFileByPath(parentPath);
-				if (!existingFolder) {
+				const existingFolder = await vault.adapter.stat(parentPath);
+				if (existingFolder?.type === 'folder') {
+					continue;
+				}
+				if (existingFolder?.type === 'file') {
+					pathConflict = true;
+					break;
+				}
+
+				try {
 					await vault.adapter.mkdir(parentPath);
-				} else if (!(existingFolder instanceof TFolder)) {
-					throw new Error(`Cannot create remote file because "${parentPath}" is not a folder.`);
+				} catch (error) {
+					const folderAfterCreate = await vault.adapter.stat(parentPath);
+					if (folderAfterCreate?.type === 'folder') {
+						continue;
+					}
+					if (folderAfterCreate?.type === 'file') {
+						pathConflict = true;
+						break;
+					}
+					throw error;
 				}
 			}
 
-			await vault.createBinary(safePath, remoteFile.content);
+			if (pathConflict || await vault.adapter.stat(safePath)) {
+				skipped.push(safePath);
+				localFiles.add(normalizedPath);
+				continue;
+			}
+
+			try {
+				await vault.createBinary(safePath, remoteFile.content);
+			} catch (error) {
+				if (await vault.adapter.stat(safePath)) {
+					skipped.push(safePath);
+					localFiles.add(normalizedPath);
+					continue;
+				}
+				throw error;
+			}
+
 			imported.push(safePath);
 			localFiles.add(normalizedPath);
 		}

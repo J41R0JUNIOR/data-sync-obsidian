@@ -17,6 +17,12 @@ main.js
 
 # obsidian
 data.json
+credentials.json
+*.local.json
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
+
+# Google OAuth local secrets
+.obsidian/plugins/data-sync-obsidian/credentials.json
+.obsidian/plugins/data-sync-obsidian/data.json
